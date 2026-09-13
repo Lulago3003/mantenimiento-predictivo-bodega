@@ -40,8 +40,13 @@ def grafica(e):
     pl = " ".join(f"{X(nh-1+i):.1f},{Y(v):.1f}" for i, v in reversed(list(enumerate(lo))))
     s.append(f'<polygon points="{ph} {pl}" class="band"/>')
     s.append(f'<line x1="{PL}" y1="{Y(lim):.1f}" x2="{W-PR}" y2="{Y(lim):.1f}" class="lim"/>')
-    s.append(f'<text x="{W-PR}" y="{Y(lim)-7:.1f}" class="limt" text-anchor="end">'
-             f'límite de alarma {lim}</text>')
+    # etiqueta del umbral a la izquierda, sobre un respaldo del color de la superficie
+    txt = f"límite de alarma {lim}"
+    tw = len(txt) * 5.6 + 10
+    ty = Y(lim) - 7
+    s.append(f'<rect x="{PL+5}" y="{ty-10:.1f}" width="{tw:.0f}" height="14" rx="3" '
+             f'fill="var(--surf)" opacity=".92"/>')
+    s.append(f'<text x="{PL+10}" y="{ty:.1f}" class="limt" text-anchor="start">{txt}</text>')
     s.append(f'<line x1="{PL}" y1="{H-PB}" x2="{W-PR}" y2="{H-PB}" class="base"/>')
     xa = X(nh - 1)
     s.append(f'<line x1="{xa:.1f}" y1="{PT}" x2="{xa:.1f}" y2="{H-PB}" class="div"/>')
