@@ -12,6 +12,17 @@ PL, PR, PT, PB = 60, 20, 22, 32
 esc = lambda v, a, b, c, d: (c + d) / 2 if abs(b - a) < 1e-9 else c + (v - a) * (d - c) / (b - a)
 t_lab = lambda k: f"{k:+.0f} min" if k else "ahora"
 
+from datetime import datetime, timedelta
+DIAS = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
+         "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
+T0 = datetime.strptime(D["generado"], "%Y-%m-%d %H:%M")
+FECHA_LARGA = (f"{DIAS[T0.weekday()]} {T0.day} de {MESES[T0.month-1]} de {T0.year}"
+               f" · {T0:%H:%M}")
+FECHA_CORTA = f"{DIAS[T0.weekday()][:3]}. {T0.day} {MESES[T0.month-1][:3]}"
+reloj = lambda k: (T0 + timedelta(minutes=k)).strftime("%H:%M:%S")
+sello = lambda k: (T0 + timedelta(minutes=k)).strftime("%Y-%m-%d %H:%M:%S")
+
 
 def grafica(e):
     hist, med, lo, hi = e["historico"], e["pronostico"], e["banda_lo"], e["banda_hi"]
@@ -70,23 +81,26 @@ def grafica(e):
     s.append("</svg>")
 
     pts = ([{"x": round(X(i), 1), "y": round(Y(v), 1), "v": v, "f": 0,
-             "t": t_lab((i-nh+1)*PASO_MIN)} for i, v in enumerate(hist)] +
+             "t": t_lab((i-nh+1)*PASO_MIN), "h": reloj((i-nh+1)*PASO_MIN),
+             "s": sello((i-nh+1)*PASO_MIN)} for i, v in enumerate(hist)] +
            [{"x": round(X(nh-1+i), 1), "y": round(Y(v), 1), "v": v, "f": 1,
-             "t": t_lab((i+1)*PASO_MIN), "lo": lo[i], "hi": hi[i]}
+             "t": t_lab((i+1)*PASO_MIN), "h": reloj((i+1)*PASO_MIN),
+             "s": sello((i+1)*PASO_MIN), "lo": lo[i], "hi": hi[i]}
             for i, v in enumerate(med)])
     return "".join(s), pts
 
 
 def tabla(e):
     nh = len(e["historico"])
-    f = ["<table><thead><tr><th>Tiempo</th><th>Pronóstico</th><th>Mínimo</th>"
-         "<th>Máximo</th><th>Estado</th></tr></thead><tbody>"]
+    f = ["<table><thead><tr><th>Hora</th><th>Tiempo</th><th>Pronóstico</th><th>Mínimo</th>"
+         "<th>Máximo</th><th>Margen al límite</th><th>Estado</th></tr></thead><tbody>"]
     lim = e["hechos"]["limite_alarma_C"]
     for i in range(0, len(e["pronostico"]), 4):
         v, a, b = e["pronostico"][i], e["banda_lo"][i], e["banda_hi"][i]
         est = "sobre el límite" if b >= lim else "dentro de rango"
-        f.append(f"<tr><td>{t_lab((i+1)*PASO_MIN)}</td><td>{v:.3f}</td><td>{a:.3f}</td>"
-                 f"<td>{b:.3f}</td><td>{est}</td></tr>")
+        f.append(f"<tr><td>{reloj((i+1)*PASO_MIN)}</td><td>{t_lab((i+1)*PASO_MIN)}</td>"
+                 f"<td>{v:.3f}</td><td>{a:.3f}</td><td>{b:.3f}</td>"
+                 f"<td>{lim-v:+.3f}</td><td>{est}</td></tr>")
     return "".join(f) + "</tbody></table>"
 
 
@@ -94,10 +108,10 @@ salas, paneles, jsdata = [], [], {}
 for i, e in enumerate(EQ):
     h, al = e["hechos"], e["estado"] == "ALERTA"
     svg, pts = grafica(e)
-    jsdata[str(i)] = {"pts": pts}
-    npec = 4 if i == 0 else 3
-    peces = "".join('<svg viewBox="0 0 120 50" style="opacity:%.2f"><use href="#tuna"/></svg>'
-                    % (0.92 - j * 0.17) for j in range(npec))
+    jsdata[str(i)] = {"pts": pts, "nombre": e["nombre"], "sensor": e["sensor"],
+                      "lim": h["limite_alarma_C"], "estado": e["estado"]}
+    peces = '<svg viewBox="0 0 120 50"><use href="#tuna"/></svg>'
+    ult = reloj(0)
     salas.append(f'''
     <button class="sala {'act' if i==0 else ''} {'alert' if al else ''}" data-i="{i}">
       <div class="s-top"><span class="s-n">{html.escape(e["nombre"])}</span>
@@ -106,7 +120,7 @@ for i, e in enumerate(EQ):
       <div class="s-v">{h["temperatura_actual_C"]}<span class="u">u</span></div>
       <div class="s-d">{html.escape(h["tendencia"])} · {h["deriva_C_por_hora"]}/h ·
         límite {h["limite_alarma_C"]}</div>
-      <div class="peces">{peces}</div>
+      <div class="s-f">{peces}<span>última lectura {ult}</span></div>
     </button>''')
 
     ver = ("La lectura actual ya supera el límite de alarma."
@@ -114,13 +128,20 @@ for i, e in enumerate(EQ):
            (f"Cruce del límite previsto en ~{int(h['minutos_hasta_limite'])} min."
             if h["supera_limite"] else
             f"Sin cruce del límite en los próximos {int(h['horizonte_min'])} min."))
-    filas = [("Lectura actual", h["temperatura_actual_C"]),
+    margen = round(h["limite_alarma_C"] - h["temperatura_actual_C"], 3)
+    filas = [("Fecha", FECHA_CORTA),
+             ("Última lectura", reloj(0)),
+             ("Fin del pronóstico", reloj(h["horizonte_min"])),
+             ("Lectura actual", h["temperatura_actual_C"]),
+             ("Margen al límite", f"{margen:+.3f}"),
              ("Límite de alarma", h["limite_alarma_C"]),
              ("Pronóstico final", h["pronostico_final_C"]),
              ("Rango previsto", f'{h["pronostico_min_C"]} – {h["pronostico_max_C"]}'),
              ("Tendencia", f'{h["tendencia"]} ({h["deriva_C_por_hora"]}/h)'),
              ("Banda de confianza", h["banda_confianza_C"]),
-             ("Lecturas fuera de rango", f'{h["puntos_anomalos_ultima_ventana"]} de {h["puntos_evaluados"]}')]
+             ("Lecturas fuera de rango", f'{h["puntos_anomalos_ultima_ventana"]} de {h["puntos_evaluados"]}'),
+             ("Puntos de histórico", len(e["historico"])),
+             ("Modelo", "TimesFM 2.5 (200M)")]
     paneles.append(f'''
     <section class="panel {'act' if i==0 else ''}" data-p="{i}">
       <div class="p-head">
@@ -131,8 +152,12 @@ for i, e in enumerate(EQ):
           <svg style="width:13px;height:13px"><use href="#ico-{'al' if al else 'ok'}"/></svg>
           {e["estado"]}</div><em>{html.escape(ver)}</em></div>
       </div>
-      <div class="vistas"><button class="on" data-v="grafica">Gráfica</button>
-        <button data-v="tabla">Tabla</button></div>
+      <div class="barra">
+        <div class="vistas"><button class="on" data-v="grafica">Gráfica</button>
+          <button data-v="tabla">Tabla</button></div>
+        <button class="exp" data-e="{i}"><svg><use href="#ico-dl"/></svg>
+          Exportar este equipo a Excel</button>
+      </div>
       <div class="chartbox" data-c="{i}">{svg}<div class="tip"></div></div>
       <div class="leg">
         <span><i class="g1"></i>lectura registrada</span>
@@ -160,7 +185,7 @@ out = (P.replace("{{SALAS}}", "".join(salas)).replace("{{PANELES}}", "".join(pan
         .replace("{{JSDATA}}", json.dumps(jsdata, separators=(",", ":")))
         .replace("{{NEQ}}", str(len(EQ))).replace("{{NAL}}", str(n_al))
         .replace("{{HOR}}", str(int(EQ[0]["hechos"]["horizonte_min"])))
-        .replace("{{LAT}}", f"{lat:.1f}").replace("{{GEN}}", D["generado"])
-        .replace("{{SLM}}", D["modelo_slm"]))
+        .replace("{{LAT}}", f"{lat:.1f}").replace("{{GEN}}", FECHA_LARGA)
+        .replace("{{SLM}}", D["modelo_slm"]).replace("{{SELLO}}", T0.strftime("%Y%m%d_%H%M")))
 open("dashboard/index.html", "w", encoding="utf-8").write(out)
 print(f"dashboard/index.html generado ({len(out)//1024} KB)")
